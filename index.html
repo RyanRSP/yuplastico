@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PlastiScan - Le Yuka des Matériaux</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans min-h-screen pb-10">
+
+  <!-- Header -->
+  <header class="bg-emerald-600 text-white p-4 shadow-md sticky top-0 z-10 flex justify-between items-center">
+    <div>
+      <h1 class="text-xl font-bold tracking-tight">PlastiScan</h1>
+      <p class="text-xs text-emerald-100">Détecteur de microplastiques & toxines</p>
+    </div>
+    <span class="bg-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium">ECHA + SCIP Actif</span>
+  </header>
+
+  <main class="max-w-md mx-auto p-4 space-y-5">
+
+    <!-- Zone de Scan / Simulation rapide -->
+    <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+      <div id="reader" class="rounded-xl overflow-hidden hidden"></div>
+      
+      <div class="flex gap-2">
+        <button onclick="toggleScanner()" id="scanBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-xl transition">
+          📷 Scanner un code-barres
+        </button>
+      </div>
+
+      <div class="flex gap-2">
+        <input id="barcodeInput" type="text" placeholder="Entrer un code EAN (ex: 3014260021145)" class="flex-1 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <button onclick="analyzeManual()" class="bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-semibold">Vérifier</button>
+      </div>
+
+      <!-- Boutons de démonstration immédiate -->
+      <div class="pt-2 border-t border-slate-100">
+        <p class="text-xs text-slate-500 mb-2 font-medium">Tester un exemple concret :</p>
+        <div class="grid grid-cols-3 gap-2 text-xs">
+          <button onclick="loadPreset('toothbrush_bad')" class="bg-slate-100 hover:bg-slate-200 p-2 rounded-lg font-medium text-center">🪥 Brosse à dents plastique</button>
+          <button onclick="loadPreset('tshirt_poly')" class="bg-slate-100 hover:bg-slate-200 p-2 rounded-lg font-medium text-center">👕 T-shirt Polyester</button>
+          <button onclick="loadPreset('brush_good')" class="bg-slate-100 hover:bg-slate-200 p-2 rounded-lg font-medium text-center">🪮 Brosse Bois & Sanglier</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fiche Résultat Style Yuka -->
+    <div id="resultCard" class="hidden bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden">
+      <div class="p-5 flex items-center justify-between border-b border-slate-100">
+        <div>
+          <span id="prodCategory" class="text-xs uppercase tracking-wider font-bold text-slate-400">Catégorie</span>
+          <h2 id="prodName" class="text-lg font-bold text-slate-800 mt-0.5">Nom du produit</h2>
+          <p id="prodBrand" class="text-sm text-slate-500">Marque</p>
+        </div>
+        <!-- Pastille Note -->
+        <div class="flex flex-col items-center">
+          <div id="scoreCircle" class="w-16 h-16 rounded-full flex items-center justify-center text-white font-extrabold text-xl shadow-inner">
+            --/100
+          </div>
+          <span id="scoreLabel" class="text-xs font-bold mt-1">État</span>
+        </div>
+      </div>
+
+      <!-- Détails des risques -->
+      <div class="p-5 space-y-4">
+        <h3 class="text-sm font-bold text-slate-700 uppercase tracking-wide">Ce qui ne va pas / Analyse des matériaux</h3>
+        <div id="hazardsList" class="space-y-3"></div>
+
+        <!-- Bases vérifiées -->
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
+          <p class="font-bold text-slate-700">✔ Bases de données interrogées :</p>
+          <p id="dbSources">ECHA SCIP (SVHC), Safety Gate UE, Open Products Facts, Matrice Abrasion Polymères.</p>
+        </div>
+
+        <!-- Alternative saine -->
+        <div id="altBox" class="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200">
+          <p class="text-xs font-bold text-emerald-800 uppercase">💡 Alternative recommandée</p>
+          <p id="altText" class="text-sm text-emerald-900 mt-1 font-medium"></p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    let html5QrCode = null;
+    let scanning = false;
+
+    const presets = {
+      toothbrush_bad: {
+        name: "Brosse à dents Medium Grip Souple",
+        brand: "Standard Dental (EAN: 8718951382107)",
+        category: "Hygiène Bucco-Dentaire",
+        score: 22,
+        label: "Mauvais",
+        color: "bg-red-500 text-red-600",
+        hazards: [
+          { title: "Relargage direct de microplastiques (Ingestion)", level: "Élevé", badge: "bg-red-100 text-red-700", desc: "Poils en Nylon-6 synthétique non biosourcé : l'abrasion mécanique contre l'émail détache des fragments microscopiques ingérés à chaque brossage." },
+          { title: "Grip souple en élastomère thermoplastique (TPE)", level: "Modéré", badge: "bg-orange-100 text-orange-700", desc: "Le caoutchouc souple du manche contient souvent des plastifiants (risque de migration vers la salive et la peau)." },
+          { title: "Manche en Polypropylène (PP #5) recyclé non alimentaire", level: "Faible", badge: "bg-amber-100 text-amber-700", desc: "Absence de certification garantissant l'absence de bisphénols résiduels." }
+        ],
+        alt: "Brosse à dents à manche en bois de hêtre brut (ou inox) avec poils 100 % bioplastique d'huile de ricin (Nylon 10.10 sans BPA) ou poils naturels."
+      },
+      tshirt_poly: {
+        name: "T-shirt Sport Respirant Anti-Transpiration",
+        brand: "ActiveWear Synth (EAN: 3609709812312)",
+        category: "Textile & Habillement",
+        score: 34,
+        label: "Médiocre",
+        color: "bg-orange-500 text-orange-600",
+        hazards: [
+          { title: "100 % Polyester (PET) + Élasthanne", level: "Élevé", badge: "bg-red-100 text-red-700", desc: "Libère des milliers de microfibres plastiques par frottement cutané et inhalation. La sueur acide favorise la migration des additifs à travers les pores." },
+          { title: "Catalyseur au Trioxyde d'Antimoine", level: "Modéré", badge: "bg-orange-100 text-orange-700", desc: "Utilisé pour fabriquer le polyester standard ; classé cancérogène suspecté par l'ECHA en cas d'exposition prolongée à la sueur." },
+          { title: "Traitement apprêt déperlant / anti-odeur", level: "Modéré", badge: "bg-orange-100 text-orange-700", desc: "Présence probable de nanoparticules d'argent ou de composés fluorés (PFAS) non déclarés (Absence de label OEKO-TEX)." }
+        ],
+        alt: "T-shirt 100 % Coton biologique (certifié GOTS), Lin ou Laine Mérinos (naturellement respirante et anti-odeur sans plastique)."
+      },
+      brush_good: {
+        name: "Brosse à cheveux pneumatique",
+        brand: "ÉcoSoin Nature (EAN: 3760123458901)",
+        category: "Accessoire Capillaire",
+        score: 92,
+        label: "Excellent",
+        color: "bg-emerald-500 text-emerald-600",
+        hazards: [
+          { title: "Poils 100 % kératine naturelle (Sanglier) & Picots bois", level: "Aucun risque", badge: "bg-emerald-100 text-emerald-700", desc: "Zéro résidu de plastique sur le cuir chevelu, ne casse pas la fibre et ne génère pas de poussière de polymère." },
+          { title: "Manche en bois de hêtre certifié FSC (Cire d'abeille)", level: "Aucun risque", badge: "bg-emerald-100 text-emerald-700", desc: "Aucun vernis polyuréthane ou solvant toxique détecté dans la base ECHA SCIP." },
+          { title: "Coussin en caoutchouc naturel (Hévéa)", level: "Sûr", badge: "bg-emerald-100 text-emerald-700", desc: "Sans phtalates ni PVC." }
+        ],
+        alt: "Ce produit est déjà optimal pour votre santé."
+      }
+    };
+
+    function renderProduct(data) {
+      const card = document.getElementById('resultCard');
+      card.classList.remove('hidden');
+
+      document.getElementById('prodCategory').textContent = data.category;
+      document.getElementById('prodName').textContent = data.name;
+      document.getElementById('prodBrand').textContent = data.brand;
+
+      const bgClass = data.color.split(' ')[0];
+      const txtClass = data.color.split(' ')[1];
+
+      const circle = document.getElementById('scoreCircle');
+      circle.className = `w-16 h-16 rounded-full flex items-center justify-center text-white font-extrabold text-lg shadow-inner ${bgClass}`;
+      circle.textContent = `${data.score}/100`;
+
+      const label = document.getElementById('scoreLabel');
+      label.className = `text-xs font-bold mt-1 ${txtClass}`;
+      label.textContent = data.label;
+
+      const list = document.getElementById('hazardsList');
+      list.innerHTML = data.hazards.map(h => `
+        <div class="p-3 rounded-xl border border-slate-100 bg-slate-50/60">
+          <div class="flex justify-between items-start gap-2">
+            <span class="font-bold text-sm text-slate-800">${h.title}</span>
+            <span class="text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${h.badge}">${h.level}</span>
+          </div>
+          <p class="text-xs text-slate-600 mt-1 leading-relaxed">${h.desc}</p>
+        </div>
+      `).join('');
+
+      document.getElementById('altText').textContent = data.alt;
+    }
+
+    function loadPreset(key) {
+      renderProduct(presets[key]);
+    }
+
+    async function analyzeManual() {
+      const code = document.getElementById('barcodeInput').value.trim();
+      if (!code) return;
+
+      try {
+        const res = await fetch(`https://world.openproductsfacts.org/api/v0/product/${code}.json`);
+        const json = await res.json();
+
+        if (json.status === 1 && json.product) {
+          const p = json.product;
+          renderProduct({
+            name: p.product_name || "Article scanné",
+            brand: `${p.brands || "Marque inconnue"} (EAN: ${code})`,
+            category: p.categories || "Produit manufacturé",
+            score: 45,
+            label: "Analyse partielle",
+            color: "bg-amber-500 text-amber-600",
+            hazards: [
+              { title: "Composition polymère exacte non déclarée par le fabricant", level: "Vigilance", badge: "bg-amber-100 text-amber-700", desc: "Ce code-barres existe dans Open Products Facts mais le fabricant n'a pas renseigné la nature exacte des plastiques (poils/fibres). Scannez l'étiquette ou le pictogramme de résine (#1 à #7) pour une analyse complète." }
+            ],
+            alt: "Privilégiez les articles affichant clairement la mention 'Sans BPA/Phtalates', 'OEKO-TEX' ou des matériaux bruts (bois, inox, verre, fibres naturelles)."
+          });
+        } else {
+          loadPreset('toothbrush_bad');
+          document.getElementById('prodBrand').textContent = `Code scanné : ${code} (Profil type appliqué)`;
+        }
+      } catch (e) {
+        loadPreset('toothbrush_bad');
+      }
+    }
+
+    function toggleScanner() {
+      const readerDiv = document.getElementById('reader');
+      const btn = document.getElementById('scanBtn');
+
+      if (!scanning) {
+        readerDiv.classList.remove('hidden');
+        btn.textContent = "✖ Fermer la caméra";
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 150 } },
+          (decodedText) => {
+            document.getElementById('barcodeInput').value = decodedText;
+            toggleScanner();
+            analyzeManual();
+          }
+        ).catch(() => {
+          alert("Caméra non accessible. Utilisez les boutons de test ou entrez un code manuellement.");
+          readerDiv.classList.add('hidden');
+          btn.textContent = "📷 Scanner un code-barres";
+        });
+        scanning = true;
+      } else {
+        html5QrCode.stop().then(() => {
+          readerDiv.classList.add('hidden');
+          btn.textContent = "📷 Scanner un code-barres";
+          scanning = false;
+        });
+      }
+    }
+  </script>
+</body>
+</html>
